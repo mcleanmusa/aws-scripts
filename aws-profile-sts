@@ -1,0 +1,102 @@
+#!/bin/sh
+
+AWSPROFILE=$AWS_PROFILE
+AWSSTSPROFILE="${AWS_PROFILE}-sts"
+LEASEINSECONDS="129600"
+REGION="us-east-1"
+EPOCHEXPIRATION=`date --date="$EXPIRATION" +%s`
+LOCALEXPIRATION=`date --date="@${EPOCHEXPIRATION}"` 
+UTCCURRENTTIME=`date --utc --iso-8601='sec' | cut -d+ -f1`
+EPOCHCURRENTTIME=`date +%s`
+LOCALCURRENTTIME=`date`
+MFAARN=`(aws iam get-user --profile $AWSPROFILE | grep Arn | cut -d\" -f4 | sed s/user/mfa/) 2>/dev/null`
+PROFILETEST=`echo $MFAARN | egrep 'arn:aws:iam' | wc -l`
+
+check_profile_set() {
+if [ -z $AWSPROFILE ]
+then
+  echo "WARNING: AWS_PROFILE must be set (via profile <aws-profile> prior to running profile-sts"
+  exit
+fi
+}
+
+check_profile_works() {
+if [ $PROFILETEST -ne 0 ]
+then
+  echo "Profile: $AWSPROFILE -> Found"
+else
+  echo "Error with Profile: $AWSPROFILE!"
+  exit
+fi
+}
+
+check_curprofile_expiration() {
+CURRENTPROFILEEXPIRATION=`aws configure get expiration --profile $AWSSTSPROFILE 2>/dev/null`
+if [ ! -z $CURRENTPROFILEEXPIRATION ]
+then
+  echo "Profile Expiration -> Found: $CURRENTPROFILEEXPIRATION"
+  SECONDSTILLEXPIRE=`expr $EPOCHCURRENTTIME - $CURRENTPROFILEEXPIRATION`
+  echo "Seconds till expire: $SECONDSTILLEXPIRE"
+  if [ $SECONDSTILLEXPIRE -ge 3600 ]
+    then 
+      echo "Using Existing STS Token"
+    exit
+  fi
+else
+  echo "Profile Expiration -> NotFound"
+fi
+}
+
+gettoken_prompt() {
+  echo "Requesting New STS Token"	
+  echo -e "Enter MFA Token for $AWSPROFILE: \c"
+  read TOKEN
+  echo "Token entered: $TOKEN"
+}
+
+get_token() {
+STSTOKEN=`aws sts get-session-token --duration-seconds ${LEASEINSECONDS} --serial-number ${MFAARN} --token-code $TOKEN --output text`
+SECRETACCESSKEY=`echo $STSTOKEN | awk ' { print $4 } '`
+SESSIONTOKEN=`echo $STSTOKEN | awk ' { print $5 } '`
+EXPIRATION=`echo $STSTOKEN | awk ' { print $3 } '`
+ACCESSKEYID=`echo $STSTOKEN | awk ' { print $2 } '`
+}
+
+check_token() {
+TOKENTEST=`echo $EXPIRATION | egrep '[0-9]:[0-9][0-9]Z$' | wc -l`
+if [ $TOKENTEST -eq 0 ]
+then
+  echo "Token Check Failed"
+  exit
+else 
+  echo "Token Check Passed"
+fi
+}
+
+get_debug() {
+echo "SecretAccessKey : $SECRETACCESSKEY" 
+echo "SessionToken : $SESSIONTOKEN" 
+echo "AccessKeyId : $ACCESSKEYID"
+echo "Current (Epoch Time): $EPOCHCURRENTTIME"
+echo "Expiration (Epoch Time): $EPOCHEXPIRATION" 
+echo "Current (Local Time): $LOCALCURRENTTIME"
+echo "Expiration (Local Time): $LOCALEXPIRATION" 
+echo "Current (UTC Time): ${UTCCURRENTTIME}Z"
+echo "Expiration (UTC Time): $EXPIRATION" 
+}
+
+create_sts_profile() {
+  aws configure set aws_access_key_id $ACCESSKEYID --profile $AWSSTSPROFILE
+  aws configure set aws_secret_access_key $SECRETACCESSKEY --profile $AWSSTSPROFILE
+  aws configure set aws_session_token $SESSIONTOKEN --profile $AWSSTSPROFILE
+  aws configure set region $REGION --profile $AWSSTSPROFILE
+  aws configure set expiration $EPOCHEXPIRATION --profile $AWSSTSPROFILE
+}
+
+check_profile_set
+check_profile_works
+check_curprofile_expiration
+gettoken_prompt
+get_token
+check_token
+create_sts_profile

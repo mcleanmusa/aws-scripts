@@ -1,0 +1,48 @@
+#!/bin/bash
+
+DIR=~/.ssh/keys
+PS3='Select an option: '
+
+buildmenu() {
+getitems=`\ls -1 $DIR`
+items=( $getitems )
+itemarray="@(${items[0]}"
+shopt -s extglob
+
+for ((i=1;i<${#items[@]};i++))
+do	
+	itemarray+="|${items[$i]}"
+done
+itemarray+=")"
+
+select item in "${items[@]}" "quit"
+do
+	case $item in
+	$itemarray)
+		DIR=$DIR/$item
+		break;
+		;;
+	"quit")
+		exit;;
+	*)
+		item=""
+		echo "Choose 1 to $((${#items[@]}+1))";;
+	esac
+done
+}
+
+PEMCHECK=0
+until [ $PEMCHECK -ne 0 ]
+do
+	PEMCHECK=(`ls $DIR/ | egrep '\.pem$' | wc -l`)
+	clear
+	echo
+	echo "SSH Key Selection Menu:"
+	echo
+	buildmenu
+done
+
+ssh-add $DIR
+echo
+echo "Keys Loaded:"
+ssh-add -L
