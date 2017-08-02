@@ -15,7 +15,7 @@ PROFILETEST=`echo $MFAARN | egrep 'arn:aws:iam' | wc -l`
 check_profile_set() {
 if [ -z $AWSPROFILE ]
 then
-  echo "WARNING: AWS_PROFILE must be set (via profile <aws-profile> prior to running profile-sts"
+  echo "WARNING: AWS_PROFILE must be set (via aws-profile <aws-profile> prior to running profile-sts"
   exit
 fi
 }
@@ -91,6 +91,7 @@ create_sts_profile() {
   aws configure set aws_session_token $SESSIONTOKEN --profile $AWSSTSPROFILE
   aws configure set region $REGION --profile $AWSSTSPROFILE
   aws configure set expiration $EPOCHEXPIRATION --profile $AWSSTSPROFILE
+  echo "To enable this profile enter: aws-profile $AWSSTSPROFILE"
 }
 
 check_profile_set
