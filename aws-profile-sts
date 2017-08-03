@@ -4,13 +4,9 @@ AWSPROFILE=$AWS_PROFILE
 AWSSTSPROFILE="${AWS_PROFILE}-sts"
 LEASEINSECONDS="129600"
 REGION="us-east-1"
-EPOCHEXPIRATION=`date --date="$EXPIRATION" +%s`
-LOCALEXPIRATION=`date --date="@${EPOCHEXPIRATION}"` 
-UTCCURRENTTIME=`date --utc --iso-8601='sec' | cut -d+ -f1`
-EPOCHCURRENTTIME=`date +%s`
-LOCALCURRENTTIME=`date`
 MFAARN=`(aws iam get-user --profile $AWSPROFILE | grep Arn | cut -d\" -f4 | sed s/user/mfa/) 2>/dev/null`
 PROFILETEST=`echo $MFAARN | egrep 'arn:aws:iam' | wc -l`
+EPOCHCURRENTTIME=`date +%s`
 
 check_profile_set() {
 if [ -z $AWSPROFILE ]
@@ -60,6 +56,10 @@ SECRETACCESSKEY=`echo $STSTOKEN | awk ' { print $4 } '`
 SESSIONTOKEN=`echo $STSTOKEN | awk ' { print $5 } '`
 EXPIRATION=`echo $STSTOKEN | awk ' { print $3 } '`
 ACCESSKEYID=`echo $STSTOKEN | awk ' { print $2 } '`
+EPOCHEXPIRATION=`date --date="$EXPIRATION" +%s`
+LOCALEXPIRATION=`date --date="@${EPOCHEXPIRATION}"` 
+UTCCURRENTTIME=`date --utc --iso-8601='sec' | cut -d+ -f1`
+LOCALCURRENTTIME=`date`
 }
 
 check_token() {
@@ -101,3 +101,4 @@ gettoken_prompt
 get_token
 check_token
 create_sts_profile
+get_debug
