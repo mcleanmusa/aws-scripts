@@ -101,4 +101,4 @@ gettoken_prompt
 get_token
 check_token
 create_sts_profile
-get_debug
+#get_debug
