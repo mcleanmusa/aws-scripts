@@ -36,6 +36,7 @@ then
   if [ $SECONDSTILLEXPIRE -ge 3600 ]
     then 
       echo "Using Existing STS Token"
+      echo "To enable this profile enter: aws-profile $AWSSTSPROFILE"
     exit
   fi
 else

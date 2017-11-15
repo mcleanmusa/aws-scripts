@@ -1,0 +1,158 @@
+#! /usr/bin/env python
+
+import boto3
+import argparse
+import logging
+import sys
+
+def init_logging(file_name):
+    logging.basicConfig(filename=file_name, level=logging.INFO, format='%(asctime)s\t%(levelname)s\t%(message)s')
+
+def parse_command_line():
+    parser = argparse.ArgumentParser(description='Display information about SSL certificates used in AWS ELB, ELBV2, and CloudFront.  Display certificates in IAM and Certificate Manager')
+    parser.add_argument('--profile', dest='aws_profile', default='', help='AWS Profile name to use.  If not specified, script attempts to use AWS defaults')
+    parser.add_argument('--region', dest='aws_region', default='us-east-1', help='AWS Region to use.  Default is us-east-1')
+    parser.add_argument('--log', dest='log_file', default='', help='Create log file with provided name.  Default is to not create log file')
+    args = parser.parse_args()
+    return args
+
+def describe_elb_certs(boto3_session, region):
+    elb_client = boto3_session.client('elb', region_name=region)
+    elbs = elb_client.describe_load_balancers()
+    print
+    print "--- ELB Certificates in use ---"
+    for elb in elbs['LoadBalancerDescriptions']:
+        elb_name = elb['LoadBalancerName']
+        logging.info("ELB found:  %s" % (elb_name))
+        for listener in elb['ListenerDescriptions']:
+            listener_lb_port = listener['Listener']['LoadBalancerPort']
+            logging.info("Listener found for port:  %s" % listener_lb_port)
+            if 'SSLCertificateId' in listener['Listener']:
+                cert_arn = listener['Listener']['SSLCertificateId']
+                logging.info("SSL Certificate ARN found:  %s" % (cert_arn))
+                print "%s, %s, %s" % (elb_name, listener_lb_port, cert_arn)
+            else:
+                cert_arn = ''
+
+def describe_elbv2_certs(boto3_session, region):
+    elbv2_client = boto3_session.client('elbv2', region_name=region)
+    elbs = elbv2_client.describe_load_balancers()
+    print
+    print "--- ELBv2 Certificates in use ---"
+    for elb in elbs['LoadBalancers']:
+        elb_name = elb['LoadBalancerName']
+        elb_arn = elb['LoadBalancerArn']
+        logging.info("ELB found:  %s: %s" % (elb_name, elb_arn))
+        listeners = elbv2_client.describe_listeners(LoadBalancerArn=elb_arn)
+        for listener in listeners['Listeners']:
+            listener_arn = listener['ListenerArn']
+            listener_port = listener['Port']
+            logging.info("Listener found for port, ARN: %s, %s" % (listener_port, listener_arn))
+            if 'Certificates' in listener:
+                for cert in listener['Certificates']:
+                    cert_arn = cert['CertificateArn']
+                    logging.info("SSL Certificate ARN found:  %s" % (cert_arn))
+                    print "%s, %s, %s" % (elb_name, listener_port, cert_arn)
+
+def describe_acm_certs(boto3_session, region):
+    acm_client = boto3_session.client('acm', region_name=region)
+    certs = acm_client.list_certificates()
+    print
+    print "--- Certificate Manager Certificates loaded ---"
+    for cert in certs['CertificateSummaryList']:
+        cert_arn = cert['CertificateArn']
+        cert_name = cert['DomainName']
+        logging.info("Certificate found for domain:  %s, %s" % (cert_name, cert_arn))
+        print "%s, %s" % (cert_name, cert_arn)
+        cert_info = acm_client.describe_certificate(CertificateArn=cert_arn)
+        cert_status = cert_info['Certificate']['Status']
+        cert_not_before = cert_info['Certificate']['NotBefore']
+        cert_not_after = cert_info['Certificate']['NotAfter']
+        cert_type = cert_info['Certificate']['Type']
+        logging.info("Type=%s, Status=%s, Not Before=%s, Not After=%s" % (
+                cert_type, cert_status, cert_not_before, cert_not_after))
+        print "  Type=%s, Status=%s, Not Before=%s, Not After=%s" % (
+                cert_type, cert_status, cert_not_before, cert_not_after)
+
+def describe_iam_certs(boto3_session, region):
+    iam_client = boto3_session.client('iam', region_name=region)
+    certs = iam_client.list_server_certificates()
+    print
+    print "--- IAM Server Certificates loaded ---"
+    for cert in certs['ServerCertificateMetadataList']:
+        cert_name = cert['ServerCertificateName']
+        cert_arn = cert['Arn']
+        cert_exp = cert['Expiration']
+        logging.info("Certificate found: %s, %s, Expires: %s" % (
+                cert_name, cert_arn, cert_exp))
+        print "%s, %s" % (cert_name, cert_arn)
+        print "  expires %s" % (cert_exp)
+
+def describe_cloudfront_certs(boto3_session, region):
+    cf_client = boto3_session.client('cloudfront', region_name=region)
+    distributions = cf_client.list_distributions()
+    print
+    print "--- CloudFront Certificates in use ---"
+    if 'Items' in distributions['DistributionList']:
+        for dist in distributions['DistributionList']['Items']:
+            #print dist
+            dist_arn = dist['ARN']
+            dist_id = dist['Id']
+            dist_domain_name = dist['DomainName']
+
+            dist_alias = ''
+            for alias in dist['Aliases']['Items']:
+                if dist_alias == '':
+                    dist_alias = alias
+                else:
+                    dist_alias = "%s, %s" % (dist_alias, alias)
+            logging.info("distribution found for ARN, Id, domain name, alias:  %s, %s, %s, %s" % (
+                    dist_arn, dist_id, dist_domain_name, dist_alias))
+
+            cert_source = dist['ViewerCertificate']['CertificateSource']
+            cert_arn = dist['ViewerCertificate']['Certificate']
+            print "%s (%s), %s, %s" % (dist_domain_name, dist_alias, cert_source, cert_arn)
+
+
+def main():
+    args = parse_command_line()
+
+    # only do logging if file name arg present
+    if args.log_file != '':
+        init_logging(args.log_file)
+
+    logging.info('START aws-ssl-certs script')
+
+    # create boto3 session to re-use with multiple API calls
+    if args.aws_profile == '':
+        session = boto3.session.Session()
+    else:
+        session = boto3.session.Session(profile_name=args.aws_profile)
+
+    # iam server certificates
+
+
+    # elb
+    logging.info('Attempting to query elb')
+    describe_elb_certs(session, args.aws_region)
+
+    # elbv2
+    logging.info('Attempting to query elbv2')
+    describe_elbv2_certs(session, args.aws_region)
+
+    # cloudfront
+    logging.info('Attempting to query cloudfront')
+    describe_cloudfront_certs(session, args.aws_region)
+
+    # acm
+    logging.info('Attempting to query acm')
+    describe_acm_certs(session, args.aws_region)
+
+    # iam
+    logging.info('Attempting to query iam')
+    describe_iam_certs(session, args.aws_region)
+
+    logging.info('END aws-ssl-certs script')
+
+if __name__ == "__main__":
+    main()
